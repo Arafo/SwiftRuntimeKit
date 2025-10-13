@@ -7,7 +7,6 @@ Edit small scripts and run them **on-device** without recompiling the app.
 - ✅ **Library**: VM, bytecode model, native bridge, SwiftSyntax compiler
 - ✅ **CLI** `srk`: run `.swift` scripts locally
 - ✅ **iOS Demo** (minimal): SwiftUI TextEditor + Run
-- ✅ **CI** (GitHub Actions): SwiftPM build & tests + iOS demo build
 - 🔜 SwiftSyntax parser, `.sbc` binary writer/reader, HMAC signing, hot reload (WS)
 
 ## Quick start (CLI)
