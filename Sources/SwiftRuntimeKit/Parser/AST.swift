@@ -10,17 +10,15 @@ public struct ScriptFunction {
     public let params: [String]
     public let body: [Stmt]
     public init(name: String, params: [String], body: [Stmt]) {
-        self.name = name
-        self.params = params
-        self.body = body
+        self.name = name; self.params = params; self.body = body
     }
 }
 
 public enum Stmt {
-    case letDecl(name: String, expr: Expr)
-    case expr(Expr)
-    case `return`(Expr?)
-    case ifStmt(cond: Expr, thenBody: [Stmt], elseBody: [Stmt]?)
+    case letDecl(name: String, expr: Expr, line: Int)
+    case expr(Expr, line: Int)
+    case `return`(Expr?, line: Int)
+    case ifStmt(cond: Expr, thenBody: [Stmt], elseBody: [Stmt]?, line: Int)
 }
 
 public enum BinaryOp { case add, eq }
