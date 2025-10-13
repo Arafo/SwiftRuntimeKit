@@ -1,0 +1,26 @@
+name: CI
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (SwiftPM)
+        run: swift build -v
+      - name: Test (SwiftPM)
+        run: swift test -v
+      - name: Build iOS Demo (XcodeGen + xcodebuild)
+        run: |
+          brew install xcodegen || true
+          cd iOSDemo
+          xcodegen generate
+          cd ..
+          xcodebuild -project iOSDemo/SwiftRuntimeKitDemo.xcodeproj \
+            -scheme SwiftRuntimeKitDemo \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -configuration Debug build
