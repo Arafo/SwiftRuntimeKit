@@ -6,7 +6,7 @@ struct SRKCLI {
     static func main() throws {
         let args = CommandLine.arguments.dropFirst()
         guard let path = args.first else {
-            writeError("Usage: srk <script-file.slk>")
+            writeError("Usage: srk <script.swift>")
             exit(1)
         }
         let url = URL(fileURLWithPath: path)
@@ -14,7 +14,6 @@ struct SRKCLI {
             writeError("Cannot read file: \(path)")
             exit(2)
         }
-        let lines = text.split(separator: "\n").map { String($0) }
 
         let natives = NativeRegistry()
         natives.register(NativeLog())
@@ -23,7 +22,7 @@ struct SRKCLI {
         })
 
         let runtime = ScriptRuntime(natives: natives)
-        let result = try runtime.run(lines: lines)
+        let result = try runtime.runSwiftSource(text)
         print("Program returned:", result.string)
     }
 

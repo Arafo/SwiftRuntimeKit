@@ -61,6 +61,7 @@ public enum Instruction {
     case callNative(nameIndex: Int, argc: Int)
     case callFunc(funcIndex: Int, argc: Int)
     case add
+    case eq
     case pop
     case jump(offset: Int)
     case jumpIfFalse(offset: Int)

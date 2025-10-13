@@ -1,3 +1,0 @@
-let name = "Rafa"
-log("Hola " + name)
-setText(id: "title", text: "Ready")

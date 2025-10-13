@@ -12,11 +12,15 @@ let package = Package(
         .executable(name: "srk", targets: ["SwiftRuntimeKitCLI"])
     ],
     dependencies: [
-        // none
+        .package(url: "https://github.com/apple/swift-syntax.git", from: "510.0.0")
     ],
     targets: [
         .target(
             name: "SwiftRuntimeKit",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax")
+            ],
             path: "Sources/SwiftRuntimeKit"
         ),
         .executableTarget(
