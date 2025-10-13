@@ -4,7 +4,6 @@ public enum VMError: Error, CustomStringConvertible {
     case unknownFunction(String)
     case arityMismatch(expected: Int, got: Int)
     case constantNotAName
-    case invalidAdd
     case gasExceeded
     case ipOutOfBounds
 
@@ -13,7 +12,6 @@ public enum VMError: Error, CustomStringConvertible {
         case .unknownFunction(let n): return "Unknown function: \(n)"
         case .arityMismatch(let e, let g): return "Arity mismatch. Expected \(e), got \(g)"
         case .constantNotAName: return "Constant is not a name"
-        case .invalidAdd: return "Invalid add operands"
         case .gasExceeded: return "Gas/step limit exceeded"
         case .ipOutOfBounds: return "Instruction pointer out of bounds"
         }
@@ -34,7 +32,7 @@ public final class VM {
     private let natives: NativeRegistry
     private let gasLimit: Int?
 
-    public init(chunks: [Chunk], functions: [FunctionRef], natives: NativeRegistry, gasLimit: Int? = 50_000) {
+    public init(chunks: [Chunk], functions: [FunctionRef], natives: NativeRegistry, gasLimit: Int? = 200_000) {
         self.chunks = chunks
         self.functions = functions
         self.natives = natives
@@ -62,7 +60,7 @@ public final class VM {
         }
     }
 
-    private func add(_ a: Value, _ b: Value) throws -> Value {
+    private func add(_ a: Value, _ b: Value) -> Value {
         switch (a, b) {
         case let (.int(x), .int(y)): return .int(x + y)
         case let (.double(x), .double(y)): return .double(x + y)
@@ -71,7 +69,7 @@ public final class VM {
         case let (.string(x), .string(y)): return .string(x + y)
         case let (.string(x), _): return .string(x + b.string)
         case let (_, .string(y)): return .string(a.string + y)
-        default: throw VMError.invalidAdd
+        default: return .null
         }
     }
 
@@ -114,10 +112,24 @@ public final class VM {
             case .add:
                 let b = stack.removeLast()
                 let a = stack.removeLast()
-                stack.append(try add(a, b))
+                stack.append(add(a, b))
+
+            case .eq:
+                let b = stack.removeLast()
+                let a = stack.removeLast()
+                let isEq: Bool
+                switch (a, b) {
+                case let (.int(x), .int(y)): isEq = (x == y)
+                case let (.double(x), .double(y)): isEq = (x == y)
+                case let (.bool(x), .bool(y)): isEq = (x == y)
+                case let (.string(x), .string(y)): isEq = (x == y)
+                case (.null, .null): isEq = true
+                default: isEq = false
+                }
+                stack.append(.bool(isEq))
 
             case .callNative(let nameIndex, let argc):
-                if case .name(let nativeName) = chunks[frame.funcRef.chunkIndex].constants[nameIndex] {
+                if case .name(let nativeName) = chunk.constants[nameIndex] {
                     let args = Array(stack.suffix(argc))
                     stack.removeLast(argc)
                     let result = try natives.call(name: nativeName, args: args)

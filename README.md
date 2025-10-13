@@ -4,8 +4,8 @@ A **dev-only** Swift-like runtime: subset parser → **bytecode** → **stack-ba
 Edit small scripts and run them **on-device** without recompiling the app.
 
 ## What's inside
-- ✅ **Library**: VM, bytecode model, native bridge, minimal assembler
-- ✅ **CLI** `srk`: run `.slk` scripts locally
+- ✅ **Library**: VM, bytecode model, native bridge, SwiftSyntax compiler
+- ✅ **CLI** `srk`: run `.swift` scripts locally
 - ✅ **iOS Demo** (minimal): SwiftUI TextEditor + Run
 - ✅ **CI** (GitHub Actions): SwiftPM build & tests + iOS demo build
 - 🔜 SwiftSyntax parser, `.sbc` binary writer/reader, HMAC signing, hot reload (WS)
@@ -13,17 +13,16 @@ Edit small scripts and run them **on-device** without recompiling the app.
 ## Quick start (CLI)
 ```bash
 swift build
-swift run srk Examples/hello.slk
+swift run srk Examples/demo.swift
 ```
 
 ## Script language (subset, POC)
-- Statements:
-  - `let name = "Rafa"`
-  - `log("Hola " + name)`
-  - `setText(id: "title", text: "Ready")`
+- Functions: define `func main()` + helpers
+- Statements: `let`, expression calls, `return`
+- Control flow: `if` / `else if` / `else`
 - Values: `String`, `Int`, `Double`, `Bool`, `null`
-- `+` for numbers/strings
-- Calls: native only (for now)
+- Operators: `+`, `==`
+- Calls: native + user-defined functions
 
 ## Embedding in your iOS app
 ```swift
@@ -35,14 +34,17 @@ natives.register(NativeSetText { id, text in
   // Bridge to your UI/store
 })
 let runtime = ScriptRuntime(natives: natives)
-_ = try? runtime.run(lines: [
-  "let title = \"Timing Ready\"",
-  "setText(id: \"header\", text: title)"
-])
+let source = """
+func main() {
+  let title = "Timing Ready"
+  setText(id: "header", text: title)
+}
+"""
+_ = try? runtime.runSwiftSource(source)
 ```
 
 ## Roadmap (short)
-- Parser via SwiftSyntax (func, if/while)
+- Loops (`while`) + switch/case
 - `.sbc` writer/reader + HMAC
 - Dev server + hot reload (WebSocket)
 - Source maps (pc → line)

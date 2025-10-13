@@ -1,10 +1,5 @@
 import Foundation
 
-public struct Program {
-    public let chunks: [Chunk]
-    public let functions: [FunctionRef]
-}
-
 public final class MiniAssembler {
     private var chunk = Chunk()
     private var functions: [FunctionRef] = []

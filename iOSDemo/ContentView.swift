@@ -3,9 +3,19 @@ import SwiftRuntimeKit
 
 struct ContentView: View {
     @State private var scriptText: String = """
-let name = "Rafa"
-log("Hola " + name)
-setText(id: "title", text: "Ready")
+func greet(_ name: String) {
+    log("Hola " + name)
+}
+
+func main() {
+    let name = "Rafa"
+    greet(name)
+    if name == "Rafa" {
+        setText(id: "title", text: "🔥 Bienvenido Rafa")
+    } else {
+        log("No es Rafa")
+    }
+}
 """
     @State private var uiText: String = "—"
     @State private var logLines: [String] = []
@@ -40,8 +50,7 @@ setText(id: "title", text: "Ready")
             if id == "title" { uiText = text }
         })
         let runtime = ScriptRuntime(natives: natives)
-        let lines = scriptText.split(separator: "\n").map(String.init)
-        _ = try? runtime.run(lines: lines)
+        _ = try? runtime.runSwiftSource(scriptText)
     }
 }
 
