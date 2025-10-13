@@ -2,6 +2,11 @@ import Foundation
 import SwiftSyntax
 import SwiftParser
 
+public struct Program: Codable {
+    public let chunks: [Chunk]
+    public let functions: [FunctionRef]
+}
+
 public final class SwiftScriptCompiler {
     public init() {}
 
@@ -17,12 +22,7 @@ public final class SwiftScriptCompiler {
         for item in file.statements {
             guard let decl = item.item.as(FunctionDeclSyntax.self) else { continue }
             let name = decl.name.text
-            let params: [String]
-            if let clause = decl.signature.parameterClause {
-                params = clause.parameters.map { $0.firstName?.text ?? "_" }
-            } else {
-                params = []
-            }
+            let params: [String] = decl.signature.parameterClause.parameters.map { $0.firstName?.text ?? "_" }
             let bodyStmts = try buildBlock(decl.body)
             funcs.append(ScriptFunction(name: name, params: params, body: bodyStmts))
         }
@@ -32,52 +32,44 @@ public final class SwiftScriptCompiler {
     private func buildBlock(_ body: CodeBlockSyntax?) throws -> [Stmt] {
         guard let body else { return [] }
         var out: [Stmt] = []
-        for stmt in body.statements {
-            out.append(try buildStmt(stmt))
-        }
+        for stmt in body.statements { out.append(try buildStmt(stmt)) }
         return out
     }
 
     private func buildStmt(_ stmt: CodeBlockItemSyntax) throws -> Stmt {
+        let converter = SourceLocationConverter(fileName: "script", tree: stmt.root)
+        let line = stmt.positionAfterSkippingLeadingTrivia.line(using: converter)
         if let v = stmt.item.as(VariableDeclSyntax.self) {
             guard v.bindingSpecifier.keywordKind == .let else {
-                throw CompilerError.unsupported("Only let supported")
+                throw SRKError.compile(message: "Only 'let' is supported", at: SourceLocation(line: line))
             }
             guard let binding = v.bindings.first,
                   let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
                   let initExpr = binding.initializer?.value else {
-                throw CompilerError.invalidLet
+                throw SRKError.compile(message: "Invalid let declaration", at: SourceLocation(line: line))
             }
-            return .letDecl(name: pattern.identifier.text, expr: try buildExpr(initExpr))
+            return .letDecl(name: pattern.identifier.text, expr: try buildExpr(initExpr), line: line)
         }
         if let ret = stmt.item.as(ReturnStmtSyntax.self) {
-            if let value = ret.expression { return .return(try buildExpr(value)) }
-            return .return(nil)
+            let ex = try ret.expression.map { try buildExpr($0) }
+            return .return(ex, line: line)
         }
         if let ifs = stmt.item.as(IfExprSyntax.self) {
-            return try buildIfExpr(ifs)
-        }
-        if let e = stmt.item.as(ExprSyntax.self) {
-            return .expr(try buildExpr(e))
-        }
-        throw CompilerError.unsupported("Unsupported statement")
-    }
-
-    private func buildIfExpr(_ ifs: IfExprSyntax) throws -> Stmt {
-        guard let condExpr = ifs.conditions.first?.condition.as(ExprSyntax.self) else {
-            throw CompilerError.unsupported("Invalid if condition")
-        }
-        let thenBody = try buildBlock(ifs.body)
-        var elseBody: [Stmt]? = nil
-        if let eb = ifs.elseBody {
-            switch eb {
-            case .codeBlock(let b):
-                elseBody = try buildBlock(b)
-            case .if(let nested):
-                elseBody = [try buildIfExpr(nested)]
+            guard let condExpr = ifs.conditions.first?.condition.as(ExprSyntax.self) else {
+                throw SRKError.compile(message: "Invalid if condition", at: SourceLocation(line: line))
             }
+            let thenBody = try buildBlock(ifs.body)
+            var elseBody: [Stmt]? = nil
+            if let eb = ifs.elseBody {
+                switch eb {
+                case .codeBlock(let b): elseBody = try buildBlock(b)
+                case .if(let nested): elseBody = try buildBlock(nested.body)
+                }
+            }
+            return .ifStmt(cond: try buildExpr(condExpr), thenBody: thenBody, elseBody: elseBody, line: line)
         }
-        return .ifStmt(cond: try buildExpr(condExpr), thenBody: thenBody, elseBody: elseBody)
+        if let e = stmt.item.as(ExprSyntax.self) { return .expr(try buildExpr(e), line: line) }
+        throw SRKError.compile(message: "Unsupported statement", at: SourceLocation(line: line))
     }
 
     private func buildExpr(_ e: ExprSyntax) throws -> Expr {
@@ -85,18 +77,12 @@ public final class SwiftScriptCompiler {
             let segments = s.segments.compactMap { $0.as(StringSegmentSyntax.self)?.content.text }
             return .string(segments.joined())
         }
-        if let i = e.as(IntegerLiteralExprSyntax.self) {
-            return .int(Int(i.literal.text) ?? 0)
-        }
-        if let b = e.as(BooleanLiteralExprSyntax.self) {
-            return .bool(b.literal.keywordKind == .true)
-        }
-        if let ref = e.as(DeclReferenceExprSyntax.self) {
-            return .ident(ref.baseName.text)
-        }
+        if let i = e.as(IntegerLiteralExprSyntax.self) { return .int(Int(i.literal.text) ?? 0) }
+        if let b = e.as(BooleanLiteralExprSyntax.self) { return .bool(b.literal.keywordKind == .true) }
+        if let id = e.as(IdentifierExprSyntax.self) { return .ident(id.identifier.text) }
         if let call = e.as(FunctionCallExprSyntax.self) {
             let name = call.calledExpression.description.trimmingCharacters(in: .whitespacesAndNewlines)
-            let args: [Expr] = try call.arguments.map { try buildExpr($0.expression) }
+            let args: [Expr] = call.arguments.map { try! buildExpr($0.expression) }
             return .call(name: name, args: args)
         }
         if let bin = e.as(InfixOperatorExprSyntax.self) {
@@ -106,31 +92,19 @@ public final class SwiftScriptCompiler {
             switch opText {
             case "+": return .binary(lhs: lhs, op: .add, rhs: rhs)
             case "==": return .binary(lhs: lhs, op: .eq, rhs: rhs)
-            default: throw CompilerError.unsupported("Operator \(opText) not supported")
+            default: throw SRKError.compile(message: "Operator \(opText) not supported", at: nil)
             }
         }
-        throw CompilerError.unsupported("Unsupported expression")
+        throw SRKError.compile(message: "Unsupported expression", at: nil)
     }
 }
 
-public enum CompilerError: Error, CustomStringConvertible {
-    case unsupported(String)
-    case invalidLet
-
-    public var description: String {
-        switch self {
-        case .unsupported(let s): return "Unsupported: \(s)"
-        case .invalidLet: return "Invalid let declaration"
-        }
-    }
-}
-
+// MARK: - BytecodeEmitter with source maps
 final class BytecodeEmitter {
     private var chunks: [Chunk] = []
     private var functions: [FunctionRef] = []
     private var localsStack: [[String: Int]] = []
     private var functionIndexByName: [String: Int] = [:]
-    private var currentChunkIndex: Int = 0
 
     func emit(program: ScriptProgram) -> Program {
         for (idx, f) in program.functions.enumerated() {
@@ -142,24 +116,22 @@ final class BytecodeEmitter {
             withChunk(index: idx) {
                 beginFunction(params: f.params)
                 for stmt in f.body { emit(stmt) }
-                currentChunk.code.append(.pushConst(addConst(.null)))
-                currentChunk.code.append(.return)
+                pushConst(.null, line: lastLineOr1())
+                currentChunk.code.append(.return); currentChunk.debugLines.append(lastLineOr1())
                 endFunction()
             }
         }
         return Program(chunks: chunks, functions: functions)
     }
 
+    private var currentChunkIndex: Int = 0
     private var currentChunk: Chunk {
         get { chunks[currentChunkIndex] }
         set { chunks[currentChunkIndex] = newValue }
     }
 
     private func withChunk(index: Int, _ body: () -> Void) {
-        let prev = currentChunkIndex
-        currentChunkIndex = index
-        body()
-        currentChunkIndex = prev
+        let prev = currentChunkIndex; currentChunkIndex = index; body(); currentChunkIndex = prev
     }
 
     private func beginFunction(params: [String]) {
@@ -169,88 +141,88 @@ final class BytecodeEmitter {
         localsStack.append(scope)
     }
 
-    private func endFunction() {
-        _ = localsStack.popLast()
-    }
+    private func endFunction() { _ = localsStack.popLast() }
+
+    private var lastLine: Int = 1
+    private func lastLineOr1() -> Int { max(1, lastLine) }
 
     private func emit(_ s: Stmt) {
         switch s {
-        case .letDecl(let name, let expr):
-            emit(expr)
-            storeLocal(name)
-        case .expr(let e):
-            emit(e)
-            currentChunk.code.append(.pop)
-        case .return(let e):
-            if let e {
-                emit(e)
-            } else {
-                currentChunk.code.append(.pushConst(addConst(.null)))
-            }
-            currentChunk.code.append(.return)
-        case .ifStmt(let cond, let thenBody, let elseBody):
-            emit(cond)
-            let jf = currentChunk.code.count
-            currentChunk.code.append(.jumpIfFalse(offset: 0))
+        case .letDecl(let name, let expr, let line):
+            lastLine = line
+            emit(expr, line: line)
+            currentChunk.code.append(.storeLocal(slotIndex(name))); currentChunk.debugLines.append(line)
+        case .expr(let e, let line):
+            lastLine = line
+            emit(e, line: line); currentChunk.code.append(.pop); currentChunk.debugLines.append(line)
+        case .return(let e, let line):
+            lastLine = line
+            if let ex = e { emit(ex, line: line) } else { pushConst(.null, line: line) }
+            currentChunk.code.append(.return); currentChunk.debugLines.append(line)
+        case .ifStmt(let cond, let thenBody, let elseBody, let line):
+            lastLine = line
+            emit(cond, line: line)
+            let jf = append(.jumpIfFalse(offset: 0), line: line)
             for st in thenBody { emit(st) }
-            let j = currentChunk.code.count
-            currentChunk.code.append(.jump(offset: 0))
+            let j = append(.jump(offset: 0), line: line)
             let elseStart = currentChunk.code.count
-            currentChunk.code[jf] = .jumpIfFalse(offset: elseStart - jf - 1)
+            patch(jf, to: elseStart - jf - 1)
             if let elseBody {
                 for st in elseBody { emit(st) }
             }
             let end = currentChunk.code.count
-            currentChunk.code[j] = .jump(offset: end - j - 1)
+            patch(j, to: end - j - 1)
         }
     }
 
-    private func emit(_ e: Expr) {
+    private func emit(_ e: Expr, line: Int) {
         switch e {
-        case .string(let s):
-            currentChunk.code.append(.pushConst(addConst(.string(s))))
-        case .int(let i):
-            currentChunk.code.append(.pushConst(addConst(.int(i))))
-        case .bool(let b):
-            currentChunk.code.append(.pushConst(addConst(.bool(b))))
+        case .string(let s): pushConst(.string(s), line: line)
+        case .int(let i): pushConst(.int(i), line: line)
+        case .bool(let b): pushConst(.bool(b), line: line)
         case .ident(let name):
-            loadLocal(name)
+            currentChunk.code.append(.loadLocal(slotIndex(name))); currentChunk.debugLines.append(line)
         case .call(let name, let args):
-            for a in args { emit(a) }
+            for a in args { emit(a, line: line) }
             if let fi = functionIndexByName[name] {
                 currentChunk.code.append(.callFunc(funcIndex: fi, argc: args.count))
             } else {
                 let idx = addConst(.name(name))
                 currentChunk.code.append(.callNative(nameIndex: idx, argc: args.count))
             }
+            currentChunk.debugLines.append(line)
         case .binary(let lhs, let op, let rhs):
-            emit(lhs)
-            emit(rhs)
-            switch op {
-            case .add: currentChunk.code.append(.add)
-            case .eq: currentChunk.code.append(.eq)
-            }
+            emit(lhs, line: line); emit(rhs, line: line)
+            switch op { case .add: currentChunk.code.append(.add); case .eq: currentChunk.code.append(.eq) }
+            currentChunk.debugLines.append(line)
         }
     }
 
-    private func loadLocal(_ name: String) {
-        guard var scope = localsStack.last else { fatalError("scope missing") }
-        if let slot = scope[name] {
-            currentChunk.code.append(.loadLocal(slot))
-        } else {
-            let slot = scope.count
-            scope[name] = slot
-            localsStack[localsStack.count - 1] = scope
-            currentChunk.code.append(.loadLocal(slot))
+    @discardableResult
+    private func append(_ i: Instruction, line: Int) -> Int {
+        currentChunk.code.append(i); currentChunk.debugLines.append(line)
+        return currentChunk.code.count - 1
+    }
+
+    private func patch(_ index: Int, to offset: Int) {
+        let line = currentChunk.debugLines[index]
+        switch currentChunk.code[index] {
+        case .jumpIfFalse: currentChunk.code[index] = .jumpIfFalse(offset: offset); currentChunk.debugLines[index] = line
+        case .jump: currentChunk.code[index] = .jump(offset: offset); currentChunk.debugLines[index] = line
+        default: break
         }
     }
 
-    private func storeLocal(_ name: String) {
+    private func pushConst(_ c: Constant, line: Int) {
+        let idx = addConst(c)
+        currentChunk.code.append(.pushConst(idx)); currentChunk.debugLines.append(line)
+    }
+
+    private func slotIndex(_ name: String) -> Int {
         guard var scope = localsStack.last else { fatalError("scope missing") }
-        let slot = scope[name] ?? scope.count
-        scope[name] = slot
-        localsStack[localsStack.count - 1] = scope
-        currentChunk.code.append(.storeLocal(slot))
+        if let slot = scope[name] { return slot }
+        let slot = scope.count; scope[name] = slot; localsStack[localsStack.count-1] = scope
+        return slot
     }
 
     @discardableResult

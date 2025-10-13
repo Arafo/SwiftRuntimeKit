@@ -1,52 +1,31 @@
 # SwiftRuntimeKit
 
-A **dev-only** Swift-like runtime: subset parser → **bytecode** → **stack-based VM** in Swift.
-Edit small scripts and run them **on-device** without recompiling the app.
+Iteration 4 — SwiftSyntax-based scripting with a custom bytecode VM.
 
-## What's inside
-- ✅ **Library**: VM, bytecode model, native bridge, SwiftSyntax compiler
-- ✅ **CLI** `srk`: run `.swift` scripts locally
-- ✅ **iOS Demo** (minimal): SwiftUI TextEditor + Run
-- 🔜 SwiftSyntax parser, `.sbc` binary writer/reader, HMAC signing, hot reload (WS)
+## What's new (Iter. 4)
+- Compiler error reporting with source locations
+- Runtime source maps (pc → line)
+- Signed `.sbc` bundles (HMAC-SHA256)
+- CLI tooling: `srk run`, `srk compile`, `srk run-bundle`
+- Tests & CI
 
-## Quick start (CLI)
+## Build
 ```bash
 swift build
-swift run srk Examples/demo.swift
+swift test
 ```
 
-## Script language (subset, POC)
-- Functions: define `func main()` + helpers
-- Statements: `let`, expression calls, `return`
-- Control flow: `if` / `else if` / `else`
-- Values: `String`, `Int`, `Double`, `Bool`, `null`
-- Operators: `+`, `==`
-- Calls: native + user-defined functions
+## CLI
+```bash
+# Run Swift source directly
+swift run srk run Examples/demo.swift
 
-## Embedding in your iOS app
-```swift
-import SwiftRuntimeKit
+# Compile to signed bundle
+swift run srk compile Examples/demo.swift -o demo.sbc --sign-key 00112233aabbccddeeff
 
-let natives = NativeRegistry()
-natives.register(NativeLog())
-natives.register(NativeSetText { id, text in
-  // Bridge to your UI/store
-})
-let runtime = ScriptRuntime(natives: natives)
-let source = """
-func main() {
-  let title = "Timing Ready"
-  setText(id: "header", text: title)
-}
-"""
-_ = try? runtime.runSwiftSource(source)
+# Run bundle (with verification)
+swift run srk run-bundle demo.sbc --key 00112233aabbccddeeff
 ```
 
-## Roadmap (short)
-- Loops (`while`) + switch/case
-- `.sbc` writer/reader + HMAC
-- Dev server + hot reload (WebSocket)
-- Source maps (pc → line)
-
-## License
-MIT
+## Security Note
+Bundles are HMAC-signed and verified when a key is provided.

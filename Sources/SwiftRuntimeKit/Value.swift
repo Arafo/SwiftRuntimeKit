@@ -1,6 +1,6 @@
 import Foundation
 
-public enum Value: Equatable {
+public enum Value: Equatable, Codable {
     case int(Int)
     case double(Double)
     case bool(Bool)
@@ -20,14 +20,14 @@ public enum Value: Equatable {
     }
 }
 
-public struct FunctionRef: Equatable {
+public struct FunctionRef: Equatable, Codable {
     public let name: String
     public let arity: Int
     public let chunkIndex: Int
     public let locals: Int
 }
 
-public enum Constant: Equatable {
+public enum Constant: Equatable, Codable {
     case string(String)
     case int(Int)
     case double(Double)
@@ -47,14 +47,14 @@ public enum Constant: Equatable {
     }
 }
 
-public struct Chunk {
+public struct Chunk: Codable {
     public var code: [Instruction] = []
     public var constants: [Constant] = []
-    public var debugLines: [Int] = []
+    public var debugLines: [Int] = [] // source map (per-instruction line)
     public init() {}
 }
 
-public enum Instruction {
+public enum Instruction: Codable {
     case pushConst(Int)
     case loadLocal(Int)
     case storeLocal(Int)

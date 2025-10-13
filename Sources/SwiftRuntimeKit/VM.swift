@@ -1,23 +1,5 @@
 import Foundation
 
-public enum VMError: Error, CustomStringConvertible {
-    case unknownFunction(String)
-    case arityMismatch(expected: Int, got: Int)
-    case constantNotAName
-    case gasExceeded
-    case ipOutOfBounds
-
-    public var description: String {
-        switch self {
-        case .unknownFunction(let n): return "Unknown function: \(n)"
-        case .arityMismatch(let e, let g): return "Arity mismatch. Expected \(e), got \(g)"
-        case .constantNotAName: return "Constant is not a name"
-        case .gasExceeded: return "Gas/step limit exceeded"
-        case .ipOutOfBounds: return "Instruction pointer out of bounds"
-        }
-    }
-}
-
 public final class VM {
     public struct Frame {
         public let funcRef: FunctionRef
@@ -32,7 +14,7 @@ public final class VM {
     private let natives: NativeRegistry
     private let gasLimit: Int?
 
-    public init(chunks: [Chunk], functions: [FunctionRef], natives: NativeRegistry, gasLimit: Int? = 200_000) {
+    public init(chunks: [Chunk], functions: [FunctionRef], natives: NativeRegistry, gasLimit: Int? = 250_000) {
         self.chunks = chunks
         self.functions = functions
         self.natives = natives
@@ -42,10 +24,10 @@ public final class VM {
     @discardableResult
     public func call(function name: String, args: [Value]) throws -> Value {
         guard let f = functions.first(where: { $0.name == name }) else {
-            throw VMError.unknownFunction(name)
+            throw SRKError.runtime(message: "Unknown function \(name)", at: nil)
         }
         guard f.arity == args.count else {
-            throw VMError.arityMismatch(expected: f.arity, got: args.count)
+            throw SRKError.runtime(message: "Arity mismatch. Expected \(f.arity), got \(args.count)", at: nil)
         }
         stack.append(contentsOf: args)
         let frame = Frame(funcRef: f, ip: 0, base: stack.count - args.count)
@@ -84,17 +66,24 @@ public final class VM {
         }
     }
 
+    private func location(for frame: Frame) -> SourceLocation? {
+        let chunk = chunks[frame.funcRef.chunkIndex]
+        let ip = max(0, min(frame.ip, chunk.debugLines.count - 1))
+        if chunk.debugLines.indices.contains(ip) {
+            return SourceLocation(line: chunk.debugLines[ip])
+        }
+        return nil
+    }
+
     private func run() throws -> Value {
         var steps = 0
         while let frame = frames.last {
             if let gas = gasLimit {
-                steps += 1; if steps > gas { throw VMError.gasExceeded }
+                steps += 1; if steps > gas { throw SRKError.runtime(message: "Gas/step limit exceeded", at: location(for: frame)) }
             }
             let chunk = chunks[frame.funcRef.chunkIndex]
-            guard frame.ip < chunk.code.count else { throw VMError.ipOutOfBounds }
+            guard frame.ip < chunk.code.count else { throw SRKError.runtime(message: "Instruction pointer out of bounds", at: location(for: frame)) }
             let instr = chunk.code[frame.ip]
-
-            // advance ip
             frames[frames.count - 1].ip += 1
 
             switch instr {
@@ -129,16 +118,18 @@ public final class VM {
                 stack.append(.bool(isEq))
 
             case .callNative(let nameIndex, let argc):
-                if case .name(let nativeName) = chunk.constants[nameIndex] {
+                if case .name(let nativeName) = chunks[frame.funcRef.chunkIndex].constants[nameIndex] {
                     let args = Array(stack.suffix(argc))
                     stack.removeLast(argc)
                     let result = try natives.call(name: nativeName, args: args)
                     stack.append(result)
-                } else { throw VMError.constantNotAName }
+                } else { throw SRKError.runtime(message: "Constant is not a native name", at: location(for: frame)) }
 
             case .callFunc(let funcIndex, let argc):
                 let f = functions[funcIndex]
-                guard f.arity == argc else { throw VMError.arityMismatch(expected: f.arity, got: argc) }
+                if f.arity != argc {
+                    throw SRKError.runtime(message: "Arity mismatch calling \(f.name). Expected \(f.arity), got \(argc)", at: location(for: frame))
+                }
                 let newBase = stack.count - argc
                 frames.append(Frame(funcRef: f, ip: 0, base: newBase))
 
