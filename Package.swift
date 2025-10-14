@@ -3,13 +3,10 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftRuntimeKit",
-    platforms: [
-        .iOS(.v17),
-        .macOS(.v13)
-    ],
+    platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "SwiftRuntimeKit", targets: ["SwiftRuntimeKit"]),
-        .executable(name: "srk", targets: ["SwiftRuntimeKitCLI"])
+        .executable(name: "SwiftRuntimeDemo", targets: ["SwiftRuntimeDemo"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-syntax.git", from: "510.0.0")
@@ -24,14 +21,9 @@ let package = Package(
             path: "Sources/SwiftRuntimeKit"
         ),
         .executableTarget(
-            name: "SwiftRuntimeKitCLI",
+            name: "SwiftRuntimeDemo",
             dependencies: ["SwiftRuntimeKit"],
-            path: "Sources/SwiftRuntimeKitCLI"
-        ),
-        .testTarget(
-            name: "SwiftRuntimeKitTests",
-            dependencies: ["SwiftRuntimeKit"],
-            path: "Tests/SwiftRuntimeKitTests"
+            path: "Sources/SwiftRuntimeDemo"
         )
     ]
 )
